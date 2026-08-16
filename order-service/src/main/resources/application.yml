@@ -1,0 +1,9 @@
+spring:
+  application:
+    name: order-service
+  main:
+    web-application-type: servlet
+server:
+  port: 8082
+  servlet:
+    context-path: /

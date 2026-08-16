@@ -1,0 +1,330 @@
+PROJECT OVERVIEW - OAuth2/JWT Authentication System
+======================================================
+
+This project implements a complete microservices-based authentication and authorization
+system using Spring Boot 4.1.0 with three independent services communicating via HTTP.
+
+QUICK START
+===========
+
+The system consists of 3 services that should be started in this order:
+
+1. Auth Service (Port 8081)
+   - Manages user authentication
+   - Issues JWT tokens
+   - Provides JWKS endpoint
+
+2. Order Service (Port 8082)
+   - Manages orders data
+   - Validates JWT tokens
+   - Enforces role-based access control
+
+3. Gateway (Port 8080)
+   - Acts as reverse proxy
+   - Validates JWT tokens
+   - Routes requests to appropriate services
+
+After starting all three services, the system is ready to handle requests.
+
+
+PROJECT STRUCTURE
+=================
+
+0Auth/
+├── auth-service/
+│   ├── pom.xml                          (Added JWT, OAuth2 libraries)
+│   ├── src/main/java/.../authservice/
+│   │   ├── AuthServiceApplication.java
+│   │   ├── ApiDocumentation.java        (API documentation with examples)
+│   │   ├── SystemArchitecture.java      (Complete architecture documentation)
+│   │   ├── TestingExamples.java         (Testing scenarios and expected results)
+│   │   ├── controller/
+│   │   │   ├── AuthController.java      (Login/Register endpoints)
+│   │   │   ├── JwksController.java      (JWKS endpoint)
+│   │   │   └── HealthController.java    (Health check)
+│   │   ├── model/
+│   │   │   ├── User.java                (User entity with roles)
+│   │   │   ├── Role.java                (Role entity)
+│   │   │   ├── AuthRequest.java         (Login request)
+│   │   │   ├── AuthResponse.java        (Login response with token)
+│   │   │   └── UserRegistrationRequest.java
+│   │   ├── service/
+│   │   │   └── UserService.java         (In-memory user CRUD)
+│   │   ├── security/
+│   │   │   ├── JwtTokenProvider.java    (Token generation)
+│   │   │   └── JwtUtils.java            (Token validation)
+│   │   └── config/
+│   │       ├── SecurityConfig.java      (Spring Security config)
+│   │       ├── JwksProvider.java        (JWKS provider)
+│   │       ├── Jwk.java                 (JWKS model)
+│   │       └── JwkSet.java              (JWKS set model)
+│   └── src/main/resources/
+│       ├── application.yml              (Server port, app config)
+│       └── application.properties       (JWT secret and expiration)
+│
+├── order-service/
+│   ├── pom.xml                          (Added JWT libraries)
+│   ├── src/main/java/.../orderservice/
+│   │   ├── OrderServiceApplication.java
+│   │   ├── controller/
+│   │   │   ├── OrderController.java     (CRUD endpoints with @PreAuthorize)
+│   │   │   └── HealthController.java    (Health check)
+│   │   ├── model/
+│   │   │   ├── Order.java               (Order entity)
+│   │   │   ├── Role.java                (Role enum)
+│   │   │   └── CreateOrderRequest.java  (Create order request)
+│   │   ├── service/
+│   │   │   └── OrderService.java        (In-memory order CRUD)
+│   │   ├── security/
+│   │   │   └── JwtValidator.java        (Token validation)
+│   │   └── config/
+│   │       └── SecurityConfig.java      (Spring Security config)
+│   └── src/main/resources/
+│       ├── application.yml              (Server port, app config)
+│       └── application.properties       (JWT secret)
+│
+└── gateway/
+    ├── pom.xml                          (Added JWT, Spring Cloud Gateway libraries)
+    ├── src/main/java/.../gateway/
+    │   ├── GatewayApplication.java
+    │   ├── controller/
+    │   │   └── HealthController.java    (Health check)
+    │   ├── config/
+    │   │   ├── SecurityConfig.java      (Spring Security config)
+    │   │   ├── GatewayConfig.java       (Route definitions)
+    │   │   └── WebMvcConfig.java        (Interceptor registration)
+    │   ├── filter/
+    │   │   └── JwtValidationFilter.java (JWT validation interceptor)
+    │   └── security/
+    │       └── JwtValidator.java        (Token validation)
+    └── src/main/resources/
+        ├── application.yml              (Server port, routes)
+        └── application.properties       (JWT secret)
+
+
+KEY FEATURES
+============
+
+1. JWT Token-Based Authentication
+   - HMAC-SHA256 algorithm (symmetric key signing)
+   - 1 hour token expiration (configurable)
+   - Claims: username, email, roles, first_name, last_name
+   - Token stored on client, no session on server
+
+2. Three-Tier Architecture
+   - Auth Service: Issues tokens and manages users
+   - Order Service: Resource server with role-based access
+   - Gateway: Entry point with token validation
+
+3. Role-Based Access Control (RBAC)
+   - USER role: Can create orders, view own orders
+   - ADMIN role: Can do everything USER can, plus create/update/delete all orders
+   - Enforced at method level using @PreAuthorize annotations
+
+4. In-Memory Storage
+   - Users stored in UserService (easily replaceable with database)
+   - Orders stored in OrderService (easily replaceable with database)
+   - No persistence layer (add JPA/Spring Data later)
+
+5. CORS Enabled
+   - Configured on all services
+   - Allows all origins and methods
+   - Suitable for development, restrict in production
+
+6. Stateless Architecture
+   - No session management
+   - Each request self-contained with JWT
+   - Horizontally scalable
+
+
+DEFAULT TEST USERS
+==================
+
+Username: user
+Password: password123
+Roles: USER
+
+Username: admin
+Password: admin123
+Roles: USER, ADMIN
+
+
+API ENDPOINTS
+=============
+
+Auth Service (http://localhost:8081)
+-----------------------------------
+POST /auth/login              - Login with credentials
+POST /auth/register           - Register new user
+GET /.well-known/jwks.json    - Get JWT public key info
+GET /api/health               - Health check
+
+Order Service (http://localhost:8082)
+------------------------------------
+POST /orders                  - Create order (requires token)
+GET /orders                   - List orders (requires token)
+GET /orders/{id}              - Get specific order (requires token)
+PUT /orders/{id}              - Update order (ADMIN only)
+DELETE /orders/{id}           - Delete order (ADMIN only)
+GET /api/health               - Health check
+
+Gateway (http://localhost:8080)
+------------------------------
+POST /auth/login              → routes to Auth Service
+POST /auth/register           → routes to Auth Service
+GET /.well-known/jwks.json    → routes to Auth Service
+POST /orders                  → routes to Order Service (with JWT validation)
+GET /orders                   → routes to Order Service (with JWT validation)
+GET /orders/{id}              → routes to Order Service (with JWT validation)
+etc...
+GET /api/health               - Health check
+
+
+AUTHENTICATION FLOW
+===================
+
+1. User Login
+   - Client sends username/password to POST /auth/login
+   - Auth Service authenticates user
+   - Auth Service generates JWT token with user claims
+   - Token returned to client
+
+2. Accessing Protected Resources
+   - Client sends request with: Authorization: Bearer <JWT_TOKEN>
+   - Gateway intercepts request
+   - JwtValidationFilter validates token signature
+   - JwtValidationFilter checks expiration
+   - If valid, request routed to service
+   - Service extracts claims from token for user context
+   - If invalid, 401 Unauthorized returned
+
+3. Service-Level Authorization
+   - Service checks user roles via @PreAuthorize
+   - USER role allows basic operations
+   - ADMIN role allows all operations
+   - 403 Forbidden returned if insufficient permissions
+
+
+CONFIGURATION
+==============
+
+JWT Secret Key:
+File: auth-service/src/main/resources/application.properties
+Key: jwt.secret=my-super-secret-key-for-jwt-signing-that-is-at-least-256-bits-long-for-hs256-algorithm
+
+Same secret must be in:
+- order-service/src/main/resources/application.properties
+- gateway/src/main/resources/application.properties
+
+Token Expiration (Auth Service only):
+File: auth-service/src/main/resources/application.properties
+Key: jwt.expiration=3600000 (milliseconds, default 1 hour)
+
+Server Ports:
+- Auth Service: 8081 (application.yml)
+- Order Service: 8082 (application.yml)
+- Gateway: 8080 (application.yml)
+
+Gateway Routes:
+File: gateway/src/main/resources/application.yml
+- /auth/** → http://localhost:8081
+- /.well-known/** → http://localhost:8081
+- /orders/** → http://localhost:8082
+
+
+IMPORTANT NOTES
+===============
+
+1. All Three Services
+   - Must use SAME JWT secret key
+   - Must have JWT libraries in pom.xml (jjwt, Lombok)
+   - All configuration done in Java classes, not YAML
+
+2. Auth Service
+   - Can be extended with OAuth2 client for social login
+   - Currently hardcoded with 2 default users
+   - Add database integration easily by replacing UserService
+
+3. Order Service
+   - Validates token independently without calling Auth Service
+   - Uses same JWT secret to verify signature
+   - Role-based access enforced at method level
+
+4. Gateway
+   - Acts as single entry point
+   - Must validate token before routing
+   - Currently enables CORS for all origins
+
+5. Security Considerations
+   - HS256 (symmetric key): Simple but secret key must be protected
+   - For production: Use RS256 (asymmetric key) with Auth Server providing public key
+   - Store secrets in environment variables or secret management system
+   - Implement token refresh mechanism for better security
+   - Add password hashing (BCrypt) to user storage
+
+
+NEXT STEPS FOR ENHANCEMENT
+===========================
+
+1. Add Database Layer
+   - Replace in-memory User and Order storage with JPA entities
+   - Add spring-boot-starter-data-jpa and database driver
+
+2. Implement Real OAuth2 Flow
+   - Add Google/Facebook OAuth2 client registration
+   - Implement OAuth2SuccessHandler for social login
+   - Create internal users from external provider claims
+
+3. Add Token Refresh Mechanism
+   - Issue refresh tokens on login
+   - Implement refresh endpoint
+   - Automatically refresh expired access tokens
+
+4. Security Hardening
+   - Switch from HS256 to RS256 with RSA keys
+   - Implement rate limiting and throttling
+   - Add request logging and audit trails
+   - Use HTTPS instead of HTTP
+   - Implement CSRF protection
+
+5. Production Deployment
+   - Move secrets to environment variables
+   - Configure separate JWT secrets per environment
+   - Add monitoring and alerting
+   - Implement distributed tracing
+   - Add API versioning
+
+
+TROUBLESHOOTING
+===============
+
+Issue: "Missing or invalid authorization header"
+- Ensure all requests to /orders include Authorization header
+- Format: Authorization: Bearer <token_here>
+- Login first to get a valid token
+
+Issue: "Invalid or expired token"
+- Check token hasn't expired (1 hour default)
+- Verify token came from this Auth Service
+- Verify JWT secret is identical on all services
+
+Issue: "Forbidden" when updating order
+- Only ADMIN role can update orders
+- Login as admin (username: admin, password: admin123)
+
+Issue: Services not communicating
+- Verify all three services are running on correct ports
+- Check gateway routes are configured correctly
+- Review console logs for detailed error messages
+
+Issue: CORS errors in browser
+- CORS is enabled on all services
+- Ensure preflight OPTIONS requests are allowed
+- Check browser developer console for specific errors
+
+
+For detailed API documentation, see:
+- auth-service/src/main/java/.../authservice/ApiDocumentation.java
+- auth-service/src/main/java/.../authservice/TestingExamples.java
+- auth-service/src/main/java/.../authservice/SystemArchitecture.java
+

@@ -1,0 +1,350 @@
+QUICK START GUIDE - How to Use the System
+==========================================
+
+STEP 1: Start All Three Services
+=================================
+
+Open three separate terminal windows and run:
+
+Terminal 1 - Auth Service (Port 8081):
+cd E:\0Auth\auth-service
+mvn spring-boot:run
+
+Terminal 2 - Order Service (Port 8082):
+cd E:\0Auth\order-service
+mvn spring-boot:run
+
+Terminal 3 - Gateway (Port 8080):
+cd E:\0Auth\gateway
+mvn spring-boot:run
+
+Wait for all services to start (look for "Started XXXApplication" messages).
+
+
+STEP 2: Login and Get Access Token
+===================================
+
+Using curl or Postman, send:
+
+POST http://localhost:8080/auth/login
+Content-Type: application/json
+
+Body:
+{
+    "username": "user",
+    "password": "password123"
+}
+
+Response:
+{
+    "accessToken": "eyJhbGciOiJIUzI1NiJ9...",
+    "tokenType": "Bearer",
+    "expiresIn": 3600,
+    "username": "user",
+    "email": "user@example.com"
+}
+
+Copy the accessToken value for next step.
+
+
+STEP 3: Create an Order
+=======================
+
+POST http://localhost:8080/orders
+Authorization: Bearer <paste_your_token_here>
+Content-Type: application/json
+
+Body:
+{
+    "description": "MacBook Pro 16-inch",
+    "amount": 2499.99
+}
+
+Response:
+{
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "userId": "1",
+    "username": "user",
+    "description": "MacBook Pro 16-inch",
+    "amount": 2499.99,
+    "status": "PENDING",
+    "createdAt": 1629202800000,
+    "updatedAt": 1629202800000
+}
+
+Note the order ID from the response.
+
+
+STEP 4: View Your Orders
+=========================
+
+GET http://localhost:8080/orders
+Authorization: Bearer <your_token_here>
+
+Response:
+[
+    {
+        "id": "550e8400-e29b-41d4-a716-446655440000",
+        "userId": "1",
+        "username": "user",
+        "description": "MacBook Pro 16-inch",
+        "amount": 2499.99,
+        "status": "PENDING",
+        "createdAt": 1629202800000,
+        "updatedAt": 1629202800000
+    }
+]
+
+As a regular USER, you only see your own orders.
+
+
+STEP 5: Try to Update Order (Should Fail)
+===========================================
+
+PUT http://localhost:8080/orders/550e8400-e29b-41d4-a716-446655440000
+Authorization: Bearer <user_token_here>
+Content-Type: application/json
+
+Body:
+{
+    "description": "Updated Description",
+    "amount": 3000.00,
+    "status": "COMPLETED"
+}
+
+Response: 403 Forbidden
+[Access denied - USER role cannot update orders]
+
+
+STEP 6: Login as Admin
+======================
+
+POST http://localhost:8080/auth/login
+Content-Type: application/json
+
+Body:
+{
+    "username": "admin",
+    "password": "admin123"
+}
+
+Response:
+{
+    "accessToken": "eyJhbGciOiJIUzI1NiJ9...",
+    "tokenType": "Bearer",
+    "expiresIn": 3600,
+    "username": "admin",
+    "email": "admin@example.com"
+}
+
+Copy the admin token.
+
+
+STEP 7: Update Order as Admin (Should Succeed)
+================================================
+
+PUT http://localhost:8080/orders/550e8400-e29b-41d4-a716-446655440000
+Authorization: Bearer <admin_token_here>
+Content-Type: application/json
+
+Body:
+{
+    "description": "Updated Description",
+    "amount": 3000.00,
+    "status": "COMPLETED"
+}
+
+Response:
+{
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "userId": "1",
+    "username": "user",
+    "description": "Updated Description",
+    "amount": 3000.00,
+    "status": "COMPLETED",
+    "createdAt": 1629202800000,
+    "updatedAt": 1629202801000
+}
+
+Success! ADMIN can update orders.
+
+
+STEP 8: View All Orders as Admin
+==================================
+
+GET http://localhost:8080/orders
+Authorization: Bearer <admin_token_here>
+
+Response:
+[
+    {
+        "id": "550e8400-e29b-41d4-a716-446655440000",
+        "userId": "1",
+        "username": "user",
+        "description": "Updated Description",
+        "amount": 3000.00,
+        "status": "COMPLETED",
+        "createdAt": 1629202800000,
+        "updatedAt": 1629202801000
+    },
+    // ... any other orders in the system
+]
+
+ADMIN sees ALL orders, not just their own.
+
+
+STEP 9: Delete Order as Admin
+===============================
+
+DELETE http://localhost:8080/orders/550e8400-e29b-41d4-a716-446655440000
+Authorization: Bearer <admin_token_here>
+
+Response:
+"Order deleted successfully"
+
+The order is now deleted.
+
+
+STEP 10: Verify Token Expiration
+=================================
+
+Create an order, then wait 1 hour (or change jwt.expiration=60000 in auth-service properties for 1 minute).
+
+Try using the old token:
+GET http://localhost:8080/orders
+Authorization: Bearer <old_expired_token>
+
+Response:
+{"error": "Invalid or expired token"}
+
+To continue, login again to get a fresh token.
+
+
+TESTING WITH CURL EXAMPLES
+===========================
+
+# 1. Login
+curl -X POST http://localhost:8080/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"user","password":"password123"}'
+
+# Save the token as variable (Linux/Mac):
+TOKEN=$(curl -s -X POST http://localhost:8080/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"user","password":"password123"}' | grep -o '"accessToken":"[^"]*' | cut -d'"' -f4)
+
+# 2. Create order
+curl -X POST http://localhost:8080/orders \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"description":"Test Order","amount":100.00}'
+
+# 3. Get orders
+curl -X GET http://localhost:8080/orders \
+  -H "Authorization: Bearer $TOKEN"
+
+# 4. Get specific order
+curl -X GET http://localhost:8080/orders/550e8400-e29b-41d4-a716-446655440000 \
+  -H "Authorization: Bearer $TOKEN"
+
+# 5. Update order (requires admin token)
+curl -X PUT http://localhost:8080/orders/550e8400-e29b-41d4-a716-446655440000 \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"description":"Updated","amount":200.00,"status":"COMPLETED"}'
+
+# 6. Delete order (requires admin token)
+curl -X DELETE http://localhost:8080/orders/550e8400-e29b-41d4-a716-446655440000 \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+
+
+TESTING WITH POSTMAN
+====================
+
+1. Import/Create a Postman Collection
+2. Create requests for each endpoint
+3. Add variables for Token and OrderId
+4. Pre-request scripts to save responses to variables
+5. Run requests in sequence to test complete flow
+
+Example Pre-request Script for Login:
+(None needed)
+
+Example Test Script for Login Response:
+pm.environment.set("token", pm.response.json().accessToken);
+
+Then use {{token}} in Authorization headers of other requests.
+
+
+KEY REMEMBER
+============
+
+1. ALL requests to /orders require a valid JWT token
+   Format: Authorization: Bearer <token>
+
+2. USER role can:
+   - Create orders
+   - View only their own orders
+   - Cannot update or delete any orders
+
+3. ADMIN role can:
+   - Create orders (as USER role)
+   - View ALL orders
+   - Update ANY order
+   - Delete ANY order
+
+4. Tokens expire after 1 hour (default)
+   - Server: auth-service/src/main/resources/application.properties (jwt.expiration)
+   - Re-login to get new token
+
+5. All three services must be running:
+   - Auth Service (8081) issues tokens
+   - Order Service (8082) manages orders
+   - Gateway (8080) validates tokens and routes
+
+6. Gateway intercepts all requests and validates JWT
+   - Tokens are validated at gateway level
+   - Services trust gateway validation
+
+7. In-memory storage means:
+   - Stop services = data is lost
+   - No database persistence
+   - Perfect for testing and learning
+   - Easy to add database layer later
+
+
+COMMON ERRORS AND SOLUTIONS
+============================
+
+Error: "Connection refused" or "Unable to connect"
+Solution: Make sure all three services are running on ports 8080, 8081, 8082
+
+Error: "Missing or invalid authorization header"
+Solution: Add -H "Authorization: Bearer <token>" to your request
+
+Error: "Invalid or expired token"
+Solution: Get a new token by logging in again
+
+Error: "Forbidden"
+Solution: You don't have permission. Use ADMIN credentials for update/delete.
+
+Error: "Order not found"
+Solution: Check the Order ID is correct, or order was deleted
+
+Error: Port already in use
+Solution: Change port in application.yml or stop service using that port
+
+
+Next Steps
+==========
+
+After you understand the basic flow:
+
+1. Try registering a new user with POST /auth/register
+2. Try creating multiple orders and switching between users
+3. See role-based access control in action
+4. Review code in src/main/java to understand implementation
+5. Read SystemArchitecture.java for deep technical details
+6. Add database layer (Spring Data JPA)
+7. Implement OAuth2 with Google/Facebook login
+
