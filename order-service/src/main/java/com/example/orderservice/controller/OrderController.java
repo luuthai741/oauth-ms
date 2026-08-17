@@ -38,7 +38,7 @@ public class OrderController {
     }
 
     @GetMapping("/{orderId}")
-    @PreAuthorize("hasAnyRole('USER', 'ADMIN')")
+    @PreAuthorize("@orderSecurity.canAccessOrder(authentication, #orderId)")
     public ResponseEntity<?> getOrder(
             @PathVariable String orderId,
             @AuthenticationPrincipal UserPrincipal principal) {

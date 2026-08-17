@@ -2,6 +2,7 @@ package com.example.orderservice.service;
 
 import com.example.orderservice.model.Order;
 import org.springframework.stereotype.Service;
+
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
@@ -22,25 +23,25 @@ public class OrderService {
             .createdAt(System.currentTimeMillis())
             .updatedAt(System.currentTimeMillis())
             .build();
-        
+
         orders.put(order.getId(), order);
         return order;
     }
-    
+
     public Order getOrderById(String orderId) {
         return orders.get(orderId);
     }
-    
+
     public List<Order> getUserOrders(String userId) {
         return orders.values().stream()
-            .filter(order -> order.getUserId().equals(userId))
+            .filter(order -> Objects.equals(order.getUserId(), userId))
             .collect(Collectors.toList());
     }
-    
+
     public List<Order> getAllOrders() {
         return new ArrayList<>(orders.values());
     }
-    
+
     public Order updateOrder(String orderId, Order order) {
         if (!orders.containsKey(orderId)) {
             throw new IllegalArgumentException("Order not found");
@@ -50,10 +51,9 @@ public class OrderService {
         orders.put(orderId, order);
         return order;
     }
-    
+
     public void deleteOrder(String orderId) {
         orders.remove(orderId);
     }
 }
-
 
