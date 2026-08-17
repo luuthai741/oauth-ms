@@ -13,11 +13,18 @@ public class ExternalAuthStateService {
     private static final long STATE_TTL_SECONDS = 300;
     private final Map<String, StateEntry> states = new ConcurrentHashMap<>();
 
-    public void saveState(String state, String provider, String codeVerifier) {
-        states.put(state, new StateEntry(provider, codeVerifier, Instant.now().plusSeconds(STATE_TTL_SECONDS)));
+    public void saveState(String state, String provider, String codeVerifier, String nonce) {
+        states.put(state, new StateEntry(provider, codeVerifier, nonce, Instant.now().plusSeconds(STATE_TTL_SECONDS)));
     }
 
-    public Optional<String> consumeState(String state, String provider) {
+    public Optional<ConsumedState> consumeState(String state, String provider) {
+        if (state == null || state.isBlank() || provider == null || provider.isBlank()) {
+            return Optional.empty();
+        }
+        if (!states.containsKey(state)) {
+            return Optional.empty();
+        }
+
         StateEntry entry = states.remove(state);
         if (entry == null) {
             return Optional.empty();
@@ -28,10 +35,13 @@ public class ExternalAuthStateService {
         if (!Instant.now().isBefore(entry.expiresAt())) {
             return Optional.empty();
         }
-        return Optional.of(entry.codeVerifier());
+        return Optional.of(new ConsumedState(entry.codeVerifier(), entry.nonce()));
     }
 
-    private record StateEntry(String provider, String codeVerifier, Instant expiresAt) {
+    public record ConsumedState(String codeVerifier, String nonce) {
+    }
+
+    private record StateEntry(String provider, String codeVerifier, String nonce, Instant expiresAt) {
     }
 }
 

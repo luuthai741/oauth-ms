@@ -1,0 +1,10 @@
+# IDE
+/.idea/
+
+# Generated signing keys
+/keys/
+
+# Optional: ignore key material anywhere in repo
+*.pem
+*.key
+

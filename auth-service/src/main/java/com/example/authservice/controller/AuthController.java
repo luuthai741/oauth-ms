@@ -50,11 +50,12 @@ public class AuthController {
     @GetMapping("/external/{provider}/login-url")
     public ResponseEntity<?> getExternalLoginUrl(@PathVariable String provider) {
         String state = externalIdentityService.generateState();
+        String nonce = externalIdentityService.generateNonce();
         String codeVerifier = externalIdentityService.generateCodeVerifier();
         String codeChallenge = externalIdentityService.generateCodeChallenge(codeVerifier);
-        externalAuthStateService.saveState(state, provider, codeVerifier);
+        externalAuthStateService.saveState(state, provider, codeVerifier, nonce);
 
-        Optional<String> authorizationUrl = externalIdentityService.buildAuthorizationUrl(provider, state, codeChallenge);
+        Optional<String> authorizationUrl = externalIdentityService.buildAuthorizationUrl(provider, state, codeChallenge, nonce);
         if (authorizationUrl.isEmpty()) {
             return new ResponseEntity<>("Unsupported provider or provider is not configured", HttpStatus.BAD_REQUEST);
         }
@@ -63,6 +64,7 @@ public class AuthController {
         response.put("provider", provider.toLowerCase(Locale.ROOT));
         response.put("authorizationUrl", authorizationUrl.get());
         response.put("state", state);
+        response.put("nonce", nonce);
         return ResponseEntity.ok(response);
     }
 
@@ -71,12 +73,16 @@ public class AuthController {
             @PathVariable String provider,
             @RequestParam String code,
             @RequestParam String state) {
-        Optional<String> codeVerifier = externalAuthStateService.consumeState(state, provider);
-        if (codeVerifier.isEmpty()) {
+        Optional<ExternalAuthStateService.ConsumedState> consumedState = externalAuthStateService.consumeState(state, provider);
+        if (consumedState.isEmpty()) {
             return new ResponseEntity<>("Invalid or expired state", HttpStatus.UNAUTHORIZED);
         }
 
-        Optional<ExternalUserProfile> verifiedProfile = externalIdentityService.exchangeCodeForProfile(provider, code, codeVerifier.get());
+        Optional<ExternalUserProfile> verifiedProfile = externalIdentityService.exchangeCodeForProfile(
+                provider,
+                code,
+                consumedState.get().codeVerifier(),
+                consumedState.get().nonce());
         if (verifiedProfile.isEmpty()) {
             return new ResponseEntity<>("External identity verification failed", HttpStatus.UNAUTHORIZED);
         }

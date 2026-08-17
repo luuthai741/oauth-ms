@@ -124,3 +124,20 @@ tbody tr:hover {
     width: 100%;
   }
 }
+
+.callback-shell {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.callback-card {
+  width: min(560px, 100%);
+  border: 1px solid #e5e5e5;
+  border-radius: 8px;
+  padding: 18px;
+  background: #ffffff;
+}
+

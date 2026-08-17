@@ -1,7 +1,6 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useMemo, useState, type FormEvent } from 'react'
 import './App.css'
 import {
-  exchangeExternalCallback,
   getExternalLoginUrl,
   getJwks,
   getOpenIdConfiguration,
@@ -13,6 +12,7 @@ import { createOrder, deleteOrder, getOrderById, getOrders, updateOrder } from '
 import { getGatewayHealth } from './api/systemApi'
 import { HttpError } from './api/http'
 import { useAuth } from './auth/AuthContext'
+import OAuthCallbackPage, { isOAuthCallbackPath } from './pages/OAuthCallbackPage'
 import type { Order } from './types'
 
 type TabId =
@@ -32,30 +32,6 @@ function App() {
   const [orders, setOrders] = useState<Order[]>([])
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
   const [externalProvider, setExternalProvider] = useState<string>('google')
-  const [externalState, setExternalState] = useState<string>('')
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    const code = params.get('code')
-    const state = params.get('state')
-    const provider = params.get('provider')
-
-    if (!code || !state || !provider) {
-      return
-    }
-
-    void (async () => {
-      try {
-        const response = await exchangeExternalCallback(provider, code, state)
-        auth.setAuthFromResponse(response)
-        setMessage(`External login success as ${response.username}`)
-        setActiveTab('orders')
-        window.history.replaceState({}, document.title, window.location.pathname)
-      } catch (error) {
-        showError(error)
-      }
-    })()
-  }, [auth])
 
   const visibleTabs = useMemo(() => {
     const tabs: { id: TabId; label: string }[] = [
@@ -142,29 +118,9 @@ function App() {
       const provider = String(form.get('provider') ?? '')
       const response = await getExternalLoginUrl(provider)
       setExternalProvider(response.provider)
-      setExternalState(response.state)
       setPayloadView(JSON.stringify(response, null, 2))
       setMessage(`Redirecting to ${response.provider} consent screen...`)
       window.location.href = response.authorizationUrl
-    } catch (error) {
-      showError(error)
-    }
-  }
-
-  const onExternalCallbackExchange = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    setMessage('')
-    const form = new FormData(event.currentTarget)
-
-    try {
-      const response = await exchangeExternalCallback(
-        String(form.get('provider') ?? ''),
-        String(form.get('code') ?? ''),
-        String(form.get('state') ?? ''),
-      )
-      auth.setAuthFromResponse(response)
-      setMessage(`External login success as ${response.username}`)
-      setActiveTab('orders')
     } catch (error) {
       showError(error)
     }
@@ -317,6 +273,10 @@ function App() {
     }
   }
 
+  if (isOAuthCallbackPath(window.location.pathname)) {
+    return <OAuthCallbackPage />
+  }
+
   return (
     <div className="app-shell">
       <header className="top-bar">
@@ -379,7 +339,7 @@ function App() {
         {activeTab === 'auth-external' && (
           <section>
             <h2>External OAuth Login</h2>
-            <p>Step 1: Get provider login URL and redirect user to consent screen.</p>
+            <p>Get provider login URL and redirect user to consent screen.</p>
             <form onSubmit={onStartExternalLogin}>
               <select
                 name="provider"
@@ -390,14 +350,13 @@ function App() {
               </select>
               <button type="submit">GET /auth/external/{'{provider}'}/login-url</button>
             </form>
-
-            <p>Step 2: Exchange provider callback code/state for internal JWT.</p>
-            <form onSubmit={onExternalCallbackExchange}>
-              <input name="provider" defaultValue={externalProvider} placeholder="provider" required />
-              <input name="code" placeholder="authorization code" required />
-              <input name="state" defaultValue={externalState} placeholder="state" required />
-              <button type="submit">GET /auth/external/{'{provider}'}/callback</button>
-            </form>
+            <p>
+              Callback is handled automatically at
+              {' '}
+              <code>/oauth/callback/{'{provider}'}</code>
+              {' '}
+              and signs in user immediately.
+            </p>
           </section>
         )}
 

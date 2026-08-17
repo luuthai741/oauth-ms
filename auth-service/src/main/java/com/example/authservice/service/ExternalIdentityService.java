@@ -1,8 +1,14 @@
 package com.example.authservice.service;
 
 import com.example.authservice.model.ExternalUserProfile;
+import com.nimbusds.jose.JWSAlgorithm;
+import com.nimbusds.jose.jwk.source.JWKSourceBuilder;
+import com.nimbusds.jose.proc.JWSVerificationKeySelector;
+import com.nimbusds.jose.proc.SecurityContext;
+import com.nimbusds.jwt.JWTClaimsSet;
+import com.nimbusds.jwt.SignedJWT;
+import com.nimbusds.jwt.proc.DefaultJWTProcessor;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.env.Environment;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
@@ -12,13 +18,16 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.util.UriComponentsBuilder;
 
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.Instant;
+import java.util.Base64;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.Base64;
 
 @Service
 public class ExternalIdentityService {
@@ -30,19 +39,16 @@ public class ExternalIdentityService {
 
     public ExternalIdentityService(
             RestClient restClient,
-            Environment environment,
-            @Value("${auth.external.base-url:http://localhost:8080}") String externalBaseUrl,
+            @Value("${auth.external.base-url:}") String externalBaseUrl,
             @Value("${auth.external.google.client-id:}") String googleClientId,
             @Value("${auth.external.google.client-secret:}") String googleClientSecret) {
-        System.out.println("ENV GOOGLE_CLIENT_ID = " +
-                System.getenv("GOOGLE_CLIENT_ID"));
         this.restClient = restClient;
         this.externalBaseUrl = externalBaseUrl;
         this.googleClientId = googleClientId;
         this.googleClientSecret = googleClientSecret;
     }
 
-    public Optional<String> buildAuthorizationUrl(String provider, String state, String codeChallenge) {
+    public Optional<String> buildAuthorizationUrl(String provider, String state, String codeChallenge, String nonce) {
         return registration(provider).map(registration -> {
             UriComponentsBuilder builder = UriComponentsBuilder
                     .fromUriString(registration.authorizationUri())
@@ -51,6 +57,10 @@ public class ExternalIdentityService {
                     .queryParam("response_type", "code")
                     .queryParam("scope", registration.scope())
                     .queryParam("state", state);
+
+            if (nonce != null && !nonce.isBlank()) {
+                builder.queryParam("nonce", nonce);
+            }
 
             if (registration.pkceEnabled()) {
                 builder.queryParam("code_challenge", codeChallenge)
@@ -63,6 +73,10 @@ public class ExternalIdentityService {
 
     public String generateState() {
         return UUID.randomUUID().toString();
+    }
+
+    public String generateNonce() {
+        return UUID.randomUUID().toString().replace("-", "") + UUID.randomUUID().toString().replace("-", "");
     }
 
     public String generateCodeVerifier() {
@@ -80,19 +94,89 @@ public class ExternalIdentityService {
         }
     }
 
-    public Optional<ExternalUserProfile> exchangeCodeForProfile(String provider, String code, String codeVerifier) {
+    public Optional<ExternalUserProfile> exchangeCodeForProfile(String provider, String code, String codeVerifier, String expectedNonce) {
         Optional<Registration> registration = registration(provider);
         if (registration.isEmpty()) {
             return Optional.empty();
         }
 
         try {
-            String accessToken = exchangeCodeForAccessToken(registration.get(), code, codeVerifier);
+            Map<String, Object> tokenPayload = exchangeCodeForTokenPayload(registration.get(), code, codeVerifier);
+            if (tokenPayload == null) {
+                return Optional.empty();
+            }
+
+            // Ưu tiên: nếu có id_token → verify bằng JWKS của provider
+            String idToken = stringValue(tokenPayload.get("id_token"));
+            if (idToken != null && !idToken.isBlank()) {
+                Optional<ExternalUserProfile> profileFromIdToken =
+                        extractProfileFromIdToken(registration.get(), idToken, expectedNonce);
+                if (profileFromIdToken.isPresent()) {
+                    return profileFromIdToken;
+                }
+            }
+
+            // Fallback: dùng access_token gọi userinfo endpoint
+            String accessToken = stringValue(tokenPayload.get("access_token"));
             if (accessToken == null || accessToken.isBlank()) {
                 return Optional.empty();
             }
             return verify(registration.get().provider(), accessToken);
         } catch (RestClientException exception) {
+            return Optional.empty();
+        }
+    }
+
+    private Optional<ExternalUserProfile> extractProfileFromIdToken(Registration registration, String idToken, String expectedNonce) {
+        try {
+            SignedJWT signedJWT = SignedJWT.parse(idToken);
+            JWSAlgorithm tokenAlgorithm = signedJWT.getHeader().getAlgorithm();
+            if (tokenAlgorithm == null || !registration.supportedJwsAlgorithms().contains(tokenAlgorithm)) {
+                return Optional.empty();
+            }
+
+            DefaultJWTProcessor<SecurityContext> processor = new DefaultJWTProcessor<>();
+            var jwkSource = JWKSourceBuilder
+                    .create(new URL(registration.jwksUri()))
+                    .build();
+            processor.setJWSKeySelector(
+                    new JWSVerificationKeySelector<>(tokenAlgorithm, jwkSource));
+
+            JWTClaimsSet claims = processor.process(signedJWT, null);
+
+            // Validate issuer
+            if (!registration.issuer().equals(claims.getIssuer())) {
+                return Optional.empty();
+            }
+
+            // Validate audience
+            List<String> audience = claims.getAudience();
+            if (audience == null || !audience.contains(registration.clientId())) {
+                return Optional.empty();
+            }
+
+            // Validate expiry
+            if (claims.getExpirationTime() == null ||
+                    claims.getExpirationTime().toInstant().isBefore(Instant.now())) {
+                return Optional.empty();
+            }
+
+            // Validate nonce when provided in authorization request
+            if (expectedNonce != null && !expectedNonce.isBlank()) {
+                String nonceClaim = stringValue(claims.getClaim("nonce"));
+                if (nonceClaim == null || !expectedNonce.equals(nonceClaim)) {
+                    return Optional.empty();
+                }
+            }
+
+            return Optional.of(ExternalUserProfile.builder()
+                    .provider(registration.provider())
+                    .providerId(claims.getSubject())
+                    .email(stringValue(claims.getStringClaim("email")))
+                    .firstName(stringValue(claims.getStringClaim("given_name")))
+                    .lastName(stringValue(claims.getStringClaim("family_name")))
+                    .build());
+        } catch (Exception e) {
             return Optional.empty();
         }
     }
@@ -104,6 +188,7 @@ public class ExternalIdentityService {
         };
     }
 
+    @SuppressWarnings("unchecked")
     private Optional<ExternalUserProfile> verifyGoogle(String accessToken) {
         try {
             Map<String, Object> payload = restClient.get()
@@ -111,13 +196,16 @@ public class ExternalIdentityService {
                     .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
                     .retrieve()
                     .body(Map.class);
-            return Optional.of(mapGoogle(payload));
+            if (payload == null) {
+                return Optional.empty();
+            }
+            return Optional.of(mapGoogleUser(payload));
         } catch (RestClientException exception) {
             return Optional.empty();
         }
     }
 
-    private ExternalUserProfile mapGoogle(Map<String, Object> payload) {
+    private ExternalUserProfile mapGoogleUser(Map<String, Object> payload) {
         return ExternalUserProfile.builder()
                 .provider("google")
                 .providerId(stringValue(payload.get("sub")))
@@ -131,7 +219,8 @@ public class ExternalIdentityService {
         return value == null ? null : value.toString();
     }
 
-    private String exchangeCodeForAccessToken(Registration registration, String code, String codeVerifier) {
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> exchangeCodeForTokenPayload(Registration registration, String code, String codeVerifier) {
         MultiValueMap<String, String> body = new LinkedMultiValueMap<>();
         body.add("grant_type", "authorization_code");
         body.add("code", code);
@@ -142,15 +231,13 @@ public class ExternalIdentityService {
             body.add("code_verifier", codeVerifier);
         }
 
-        Map<String, Object> tokenPayload = restClient.post()
+        return restClient.post()
                 .uri(registration.tokenUri())
                 .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_FORM_URLENCODED_VALUE)
                 .accept(MediaType.APPLICATION_JSON)
                 .body(body)
                 .retrieve()
                 .body(Map.class);
-
-        return tokenPayload == null ? null : stringValue(tokenPayload.get("access_token"));
     }
 
     private Optional<Registration> registration(String provider) {
@@ -165,7 +252,10 @@ public class ExternalIdentityService {
                     googleClientSecret,
                     "https://accounts.google.com/o/oauth2/v2/auth",
                     "https://oauth2.googleapis.com/token",
+                    "https://www.googleapis.com/oauth2/v3/certs",
+                    "https://accounts.google.com",
                     "openid email profile",
+                    List.of(JWSAlgorithm.RS256),
                     true));
             default -> Optional.empty();
         };
@@ -182,7 +272,7 @@ public class ExternalIdentityService {
     }
 
     private String callbackUri(String provider) {
-        return externalBaseUrl + "/auth/external/" + provider + "/callback";
+        return externalBaseUrl + "/oauth/callback/" + provider;
     }
 
     private record Registration(
@@ -191,7 +281,10 @@ public class ExternalIdentityService {
             String clientSecret,
             String authorizationUri,
             String tokenUri,
+            String jwksUri,
+            String issuer,
             String scope,
+            List<JWSAlgorithm> supportedJwsAlgorithms,
             boolean pkceEnabled) {
     }
 }

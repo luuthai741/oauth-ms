@@ -10,7 +10,7 @@ server:
 
 auth:
   external:
-    base-url: http://localhost:8080
+    base-url: http://localhost:5173
     google:
       client-id: ${GOOGLE_CLIENT_ID:}
       client-secret: ${GOOGLE_CLIENT_SECRET:}
@@ -18,3 +18,8 @@ auth:
 jwt:
   issuer: http://localhost:8081
   expiration-seconds: 3600
+  key:
+    id: auth-service-key
+    public-key-path: ${JWT_PUBLIC_KEY_PATH:./keys/jwt-public.pem}
+    private-key-path: ${JWT_PRIVATE_KEY_PATH:./keys/jwt-private.pem}
+    auto-generate-if-missing: ${JWT_KEY_AUTO_GENERATE:true}

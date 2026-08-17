@@ -3,13 +3,13 @@ package com.example.orderservice.controller;
 import com.example.orderservice.model.CreateOrderRequest;
 import com.example.orderservice.model.Order;
 import com.example.orderservice.model.UpdateOrderRequest;
+import com.example.orderservice.security.UserPrincipal;
 import com.example.orderservice.service.OrderService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -27,15 +27,13 @@ public class OrderController {
     @PostMapping
     @PreAuthorize("hasAnyRole('USER', 'ADMIN')")
     public ResponseEntity<?> createOrder(
-            @AuthenticationPrincipal Jwt jwt,
+            @AuthenticationPrincipal UserPrincipal principal,
             @Valid @RequestBody CreateOrderRequest request) {
         ResponseEntity<?> validationError = validateCreateRequest(request);
         if (validationError != null) {
             return validationError;
         }
-        String username = jwt.getSubject();
-        String userId = jwt.getClaimAsString("user_id");
-        Order order = orderService.createOrder(userId, username, request.getDescription(), request.getAmount());
+        Order order = orderService.createOrder(principal.getUserId(), principal.getUsername(), request.getDescription(), request.getAmount());
         return ResponseEntity.ok(order);
     }
 
@@ -43,14 +41,13 @@ public class OrderController {
     @PreAuthorize("hasAnyRole('USER', 'ADMIN')")
     public ResponseEntity<?> getOrder(
             @PathVariable String orderId,
-            @AuthenticationPrincipal Jwt jwt) {
+            @AuthenticationPrincipal UserPrincipal principal) {
         Order order = orderService.getOrderById(orderId);
         if (order == null) {
             return new ResponseEntity<>("Order not found", HttpStatus.NOT_FOUND);
         }
 
-        String userId = jwt.getClaimAsString("user_id");
-        if (!isAdmin(jwt) && !order.getUserId().equals(userId)) {
+        if (!principal.hasRole("ADMIN") && !order.getUserId().equals(principal.getUserId())) {
             return new ResponseEntity<>("Forbidden", HttpStatus.FORBIDDEN);
         }
 
@@ -59,15 +56,13 @@ public class OrderController {
 
     @GetMapping
     @PreAuthorize("hasAnyRole('USER', 'ADMIN')")
-    public ResponseEntity<List<Order>> getOrders(@AuthenticationPrincipal Jwt jwt) {
+    public ResponseEntity<List<Order>> getOrders(@AuthenticationPrincipal UserPrincipal principal) {
         List<Order> orders;
-        if (isAdmin(jwt)) {
+        if (principal.hasRole("ADMIN")) {
             orders = orderService.getAllOrders();
         } else {
-            String userId = jwt.getClaimAsString("user_id");
-            orders = orderService.getUserOrders(userId);
+            orders = orderService.getUserOrders(principal.getUserId());
         }
-
         return ResponseEntity.ok(orders);
     }
 
@@ -112,11 +107,6 @@ public class OrderController {
         return ResponseEntity.ok("Order deleted successfully");
     }
 
-    private boolean isAdmin(Jwt jwt) {
-        List<String> roles = jwt.getClaimAsStringList("roles");
-        return roles != null && roles.contains("ADMIN");
-    }
-
     private ResponseEntity<?> validateCreateRequest(CreateOrderRequest request) {
         if (request == null || isBlank(request.getDescription()) || request.getAmount() == null || request.getAmount() <= 0) {
             return new ResponseEntity<>("Description is required and amount must be greater than 0", HttpStatus.BAD_REQUEST);
@@ -139,8 +129,6 @@ public class OrderController {
         return value == null || value.trim().isEmpty();
     }
 }
-
-
 
 
 
